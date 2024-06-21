@@ -1,2 +1,5 @@
 *.pt filter=lfs diff=lfs merge=lfs -text
+<<<<<<< HEAD
 .MOV filter=lfs diff=lfs merge=lfs -text
+=======
+>>>>>>> 47d8ca0fb2baa9f133b4a48a5525f23fdb99abf9
