@@ -1,5 +1,7 @@
 FROM python:3.9-slim
 
+EXPOSE 8501
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
@@ -9,13 +11,14 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/alpergel/MiceVision.git
+RUN apt-get update && apt-get install -y python3-opencv
+RUN pip install opencv-python
+    
+COPY . .
+RUN pip3 install -r requirements.txt
 
-COPY requirements.txt /tmp/requirements.txt
-RUN python3 -m pip install -r /tmp/requirements.txt
-
-EXPOSE 8501
 
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
-#ENTRYPOINT ["streamlit", "run", "/app/st_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+ENTRYPOINT ["streamlit", "run"]
+CMD ["st_app.py"]
