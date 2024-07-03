@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from ultralytics import YOLO
+from ultralytics import YOLO, solutions
 import numpy as np
 import cv2
 import PIL
@@ -12,6 +12,9 @@ import math
 import os
 from datetime import datetime
 import pandas as pd
+from roboflow import Roboflow
+
+
 
 def file_selector(folder_path='.'):
     filenames = os.listdir(folder_path)
@@ -20,7 +23,6 @@ def file_selector(folder_path='.'):
 
 def centroid(results):
     # Assuming results.boxes.xyxy.cpu().numpy() returns a 2D array of shape (n_boxes, 4)
-    # where each row is [x1, y1, x2, y2] for a box.
     coords = results.boxes.xyxy.cpu().numpy()
 
     # Check if there are any boxes detected.
@@ -80,13 +82,18 @@ def count_obj_approach(lst):
   return [bottom, top]
 
 def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer, myBar):
+  # Initialize Roboflow
+  rf = Roboflow(api_key="FQmBgtlhcDpO84Vn7Cuv")
+  project = rf.workspace("conboylablabeling").project("mouseinteraction")
+  version = project.version(4)
+  
   # create video capture object
   cap = cv2.VideoCapture(video)
   if not cap.isOpened():
     exit()
 
   # count the number of frames
-  fps = cap.get(cv2.CAP_PROP_FPS)
+  w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, cv2.CAP_PROP_FRAME_HEIGHT, cv2.CAP_PROP_FPS))
   totalNoFrames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
   durationInSeconds = totalNoFrames // fps
 
@@ -106,14 +113,21 @@ def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocaliz
   rightArr = []
   objArrL, objArrR = [] , []
   objLeftInt, objRightInt = [] , []
-
+  frames = []
+  
   # MouseCheck
-  firstMouse = False
   firstObj = False
   duration = 10 * 60  # 10 minutes in seconds
   start_time = None
   
- 
+  # Init heatmap
+  video_writer = cv2.VideoWriter("heatmap_output.avi", cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+  heatmap_obj = solutions.Heatmap(
+      colormap=cv2.COLORMAP_PARULA,
+      view_img=True,
+      shape="circle",
+      classes_names=yoloMouse.names,
+  )
 
   while cap.isOpened():
     # Capture frame-by-frame
@@ -134,7 +148,10 @@ def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocaliz
     my_bar.progress(round((frameCount/(totalNoFrames))*100), text=progress_text)
     # Only Run Pipeline over every sample rate one
     if frameCount % sampleRate == 0:
-
+      
+      # Append Frames
+      frames.append(frame)
+      
       # Progress Update
       if frameCount % 1000 == 0:
         print(f"Processing: {frameCount}/{totalNoFrames} Completed {round((frameCount/(totalNoFrames))*100)}%")
@@ -145,7 +162,10 @@ def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocaliz
 
       # Check if mouse present
       mouseCheck = yoloMouse([left_frame,right_frame], verbose = False, conf = 0.65, half=True)
-
+      tracks = yoloMouse.track(left_frame, persist=True, show=False)
+      hm = heatmap_obj.generate_heatmap(left_frame, tracks)
+      video_writer.write(hm)
+      
       # Run YOLO Interaction
       if len(mouseCheck[0].boxes) > 0 or len(mouseCheck[1].boxes) > 0:
 
@@ -170,14 +190,12 @@ def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocaliz
             sorted(objArrR , key=lambda k: [k[0][1], k[0][0]])
             for k in range(len(objArrR)):
               objArrR[k].append(k)
-            firstMouse= True
             firstObj = True
 
         # Run Interaction Detector
         results = yoloInteractor([left_frame,right_frame], verbose=False)
 
         # Left
-        
         if results[0].probs.top1 == 0:
           # Calculate Object Being Interacted with
           if len(objArrL) > 1 and lC is not None:
@@ -194,6 +212,9 @@ def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocaliz
             leftTime[1] += frameT
           elif framePeriod == "T3":
             leftTime[2] += frameT
+          # If the conf was low and sampling aligns, send to active learning pipeline
+          if results[0].probs.top1conf.cpu().numpy() < 0.6 and frameCount % 5000 == 0:
+            project.upload(left_frame)
         else:
           leftArr.append(0)
 
@@ -213,6 +234,8 @@ def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocaliz
             rightTime[1] += frameT
           elif framePeriod == "T3":
             rightTime[2] += frameT
+          if results[1].probs.top1conf.cpu().numpy() < 0.6 and frameCount % 5000 == 0:
+            project.upload(right_frame)
         else:
           rightArr.append(0)
 
@@ -235,11 +258,13 @@ def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocaliz
   rightApT = rightAp/frameT
   leftApT = leftAp/frameT
 
-  return durationInSeconds, leftTime, rightTime, rightAp, leftAp, rightApT, leftApT, rightObj, leftObj
+  return durationInSeconds, leftTime, rightTime, rightAp, leftAp, rightApT, leftApT, rightObj, leftObj, frames
 start = False
+
 with st.sidebar:
     folder = file_selector()
     if st.button("Submit", type="primary"):
+        
         st.write('You selected `%s`' % folder)
         st.write(f'Running pipeline over {sum([len(files) for r, d, files in os.walk(folder)])} video(s)')
         start = True
@@ -261,17 +286,20 @@ video_extensions = ['.mp4', '.avi', '.MOV', '.mkv']
 column = ["VideoName", "leftTime", "rightTime", "leftAp", "rightAp", "leftApT", "rightApT", "leftObj", "rightObj"]
 dfTot = pd.DataFrame(columns=column)
 vidIndex = 1
+
 # Initialize Progress Bar
 progress_text = f"Processing Video: {vidIndex}"
 my_bar = st.progress(0, text=progress_text)
 
+# Initialize Frame List
+globalFrames = []
 if start:
     for monthFolder in os.listdir(folder):
         path = os.path.join(folder, monthFolder)
         for file in os.listdir(path):
             if any(file.endswith(ext) for ext in video_extensions):
                 video = os.path.join(path, file)
-                totalDuration, leftTime, rightTime, rightAp, leftAp, rightApT, leftApT, rightObj, leftObj = labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer, my_bar)
+                totalDuration, leftTime, rightTime, rightAp, leftAp, rightApT, leftApT, rightObj, leftObj, frames = labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer, my_bar)
                 data = {
                     "VideoName": [video],
                     "leftTime": [leftTime],
@@ -286,11 +314,45 @@ if start:
                 df = pd.DataFrame(data)
                 dfTot = pd.concat([dfTot, df], ignore_index=True)
                 vidIndex += 1
+                globalFrames.extend(frames)
                 my_bar.empty()
     current_datetime = datetime.now()
+    
     st.download_button(
         label="Download data as CSV",
         data=dfTot.to_csv(),
         file_name=f"{current_datetime}.csv",
         mime="text/csv",
     )
+
+    # Convert frames to PIL Images
+    pil_images = [Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)) for frame in globalFrames]
+
+    # Use session state to keep track of the current image index
+    if 'image_index' not in st.session_state:
+        st.session_state.image_index = 0
+
+    # Create three columns for layout
+    left_col, center_col, right_col = st.columns([1, 3, 1])
+
+    # Display the current image in the center column
+    with center_col:
+        if pil_images:
+            st.image(pil_images[st.session_state.image_index], use_column_width=True)
+        else:
+            st.write("No frames to display.")
+
+    # Create two columns for buttons within the center column
+    button_col1, button_col2 = center_col.columns(2)
+
+    # Back button
+    with button_col1:
+        if st.button("◀ Previous"):
+            st.session_state.image_index = (st.session_state.image_index - 1) % len(pil_images)
+            st.experimental_rerun()
+
+    # Forward button
+    with button_col2:
+        if st.button("Next ▶"):
+            st.session_state.image_index = (st.session_state.image_index + 1) % len(pil_images)
+            st.experimental_rerun()
