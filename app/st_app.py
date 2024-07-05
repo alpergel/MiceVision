@@ -121,13 +121,13 @@ def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocaliz
   start_time = None
   
   # Init heatmap
-  video_writer = cv2.VideoWriter("heatmap_output.avi", cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-  heatmap_obj = solutions.Heatmap(
-      colormap=cv2.COLORMAP_PARULA,
-      view_img=True,
-      shape="circle",
-      classes_names=yoloMouse.names,
-  )
+  #video_writer = cv2.VideoWriter("heatmap_output.avi", cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+  #heatmap_obj = solutions.Heatmap(
+  #    colormap=cv2.COLORMAP_PARULA,
+  #    view_img=True,
+  #    shape="circle",
+  #    classes_names=yoloMouse.names,
+  #)
 
   while cap.isOpened():
     # Capture frame-by-frame
@@ -162,9 +162,9 @@ def labelNOR(vidIndex, video, sampleRate, yoloInteractor, yoloMouse, yoloLocaliz
 
       # Check if mouse present
       mouseCheck = yoloMouse([left_frame,right_frame], verbose = False, conf = 0.65, half=True)
-      tracks = yoloMouse.track(left_frame, persist=True, show=False)
-      hm = heatmap_obj.generate_heatmap(left_frame, tracks)
-      video_writer.write(hm)
+      #tracks = yoloMouse.track(left_frame, persist=True, show=False)
+      #hm = heatmap_obj.generate_heatmap(left_frame, tracks)
+      #video_writer.write(hm)
       
       # Run YOLO Interaction
       if len(mouseCheck[0].boxes) > 0 or len(mouseCheck[1].boxes) > 0:
