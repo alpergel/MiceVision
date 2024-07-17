@@ -4,6 +4,8 @@ EXPOSE 8501
 
 WORKDIR /app
 
+COPY requirements.txt .
+
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
@@ -13,12 +15,12 @@ RUN apt-get update && apt-get install -y \
 
 RUN apt-get update && apt-get install -y python3-opencv
 RUN pip install opencv-python
-    
-COPY . .
+
 RUN pip3 install -r requirements.txt
+COPY . .
 
 
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
 ENTRYPOINT ["streamlit", "run"]
-CMD ["st_app.py"]
+CMD ["MiceVision.py"]
