@@ -125,7 +125,7 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
         framePeriod = np.searchsorted(time_periods, frametime)
 
         # Check for mouse presence and run YOLO
-        mouseCheck = yoloMouse([left_frame, right_frame], verbose=True)
+        mouseCheck = yoloMouse([left_frame, right_frame], verbose=False)
         
         if len(mouseCheck[0].boxes) > 0 and len(mouseCheck[1].boxes) > 0:
             if not firstObj:
@@ -137,7 +137,7 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
             lC = centroid(mouseCheck[0])
             rC = centroid(mouseCheck[1])
 
-            results = yoloInteractor([left_frame, right_frame], verbose=True)
+            results = yoloInteractor([left_frame, right_frame], verbose=False)
 
             # Left interaction
             if results[0].probs.top1 == 0:
@@ -201,7 +201,7 @@ torch.cuda.set_device(0)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 localizerPath = 'Models/yolov9_objectLocalizer.pt'
 mousePath = 'Models/yolov8s_mouse_detect_0.9.pt'
-interactorPath = 'Models/interactM.pt'
+interactorPath = 'Models/interactXL.pt'
 yoloLocalizer = YOLO(localizerPath).to(device)
 yoloMouse = YOLO(mousePath).to(device)
 yoloInteractor = YOLO(interactorPath).to(device)
@@ -213,8 +213,7 @@ dfTot = pd.DataFrame(columns=column)
 vidIndex = 1
 
 # Initialize Progress Bar
-progress_text = f"Processing Video: {vidIndex}"
-my_bar = st.progress(0, text=progress_text)
+
 
 # Initialize Frame List
 globalFrames = []
@@ -236,8 +235,11 @@ if 'processed_data' not in st.session_state:
 if start and not st.session_state.processed_data['processing_complete']:    
     for monthFolder in os.listdir(folder):
         path = os.path.join(folder, monthFolder)
+
         for file in os.listdir(path):
             if any(file.endswith(ext) for ext in video_extensions):
+                progress_text = f"Processing Video: {vidIndex}"
+                my_bar = st.progress(0, text=progress_text)
                 video = os.path.join(path, file)
                 leftTime, rightTime, rightAp, leftAp, rightApT, leftApT, rightObj, leftObj, frames, leftArr, rightArr = labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer)
                 data = {
@@ -265,7 +267,6 @@ if start and not st.session_state.processed_data['processing_complete']:
 if st.session_state.processed_data['processing_complete']:
     # Convert frames to PIL Images
     pil_images = [Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)) for frame in st.session_state.processed_data['globalFrames']]
-    my_bar.empty()
 
     # Use session state to keep track of the current image index
     if 'image_index' not in st.session_state:
