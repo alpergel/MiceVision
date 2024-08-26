@@ -6,3 +6,4 @@ pandas
 shapely
 ultralytics
 imageio
+huggingface_hub

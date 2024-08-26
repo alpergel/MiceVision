@@ -19,6 +19,9 @@ import zipfile
 import imageio.v3 as iio
 
 
+
+
+
 def file_selector(folder_path='.'):
     filenames = os.listdir(folder_path)
     selected_filename = st.selectbox('Select a folder', filenames)
@@ -33,7 +36,6 @@ def centroid(detection):
 def generate_random_name(length=10):
     letters = string.ascii_lowercase
     return ''.join(random.choice(letters) for i in range(length))
-
 # Count Number of Approaches
 def count_groups_of_ones(lst, cons):
     counter = 0  # Initialize the counter
@@ -60,96 +62,6 @@ def count_obj_approach(lst):
   bottom = len(lst) - top
   return [bottom, top]
 
-def get_centroid(box):
-    return np.array([(box[0] + box[2]) / 2, (box[1] + box[3]) / 2])
-
-def get_bounding_box(detection):
-    if len(detection.boxes) > 0:
-        return detection.boxes[0].xyxy[0].cpu().numpy()
-    return None
-
-def create_convex_hull_box(box1, box2):
-    x_min = min(box1[0], box2[0])
-    y_min = min(box1[1], box2[1])
-    x_max = max(box1[2], box2[2])
-    y_max = max(box1[3], box2[3])
-    return np.array([x_min, y_min, x_max, y_max])
-
-def process_crop(image, large_box, padding):
-    large_box[0] = max(0, large_box[0] - padding)
-    large_box[1] = max(0, large_box[1] - padding)
-    large_box[2] = min(image.shape[1], large_box[2] + padding)
-    large_box[3] = min(image.shape[0], large_box[3] + padding)
-
-    # Ensure the box is within image dimensions
-    height, width = image.shape[:2]
-    large_box = np.array([
-        max(0, large_box[0]),
-        max(0, large_box[1]),
-        min(width, large_box[2]),
-        min(height, large_box[3])
-    ]).astype(int)
-
-    # Crop the image
-    cropped_image = image[large_box[1]:large_box[3], large_box[0]:large_box[2]]
-    
-    
-    if cropped_image.size == 0 or cropped_image.shape[0] == 0 or cropped_image.shape[1] == 0:
-        return []
-    
-    cropped_image = cv2.resize(cropped_image, (256, 256))
-    return [cropped_image]
-    
-def run_interaction(left_frame, right_frame, mouse_model, object_model, padding=10):
-    cropArr = []
-    left_frame = cv2.resize(left_frame, (416,416))
-    right_frame = cv2.resize(right_frame, (416,416))
-    
-    # Detect Mice
-    mouseL = mouse_model(left_frame, verbose=False,  max_det = 1)[0]
-    mouseR = mouse_model(right_frame, verbose=False,  max_det = 1)[0]
-    
-    if len(mouseL) > 0 and len(mouseR) > 0:
-        # Detect objects
-        objectsL = object_model(left_frame, verbose=False, max_det = 2)
-        lBoxes = []
-        for obj in objectsL:
-            lBoxes.append(obj.boxes.xyxy.cpu().numpy())
-        objectsR = object_model(right_frame, verbose=False, max_det = 2)
-        rBoxes = []
-        for obj in objectsR:
-            rBoxes.append(obj.boxes.xyxy.cpu().numpy())
-        
-        # Sort Sided Object Arrays by Y coordinate
-        lBoxes = sorted(lBoxes[0], key=lambda o: get_centroid(o)[1])
-        rBoxes = sorted(rBoxes[0], key=lambda o: get_centroid(o)[1])
-        
-        # Process left side
-        mouse_centroid = get_centroid(mouseL[0].boxes.xyxy.cpu().numpy()[0])
-        object_centroids = []
-        for box in lBoxes:
-            object_centroids.append(get_centroid(box))
-        distances = [np.linalg.norm(mouse_centroid - obj_centroid) for obj_centroid in object_centroids]
-        if len(distances) > 1:
-            chosen_object_box = lBoxes[np.argmin(distances)]
-            large_box = create_convex_hull_box(mouseL[0].boxes.xyxy.cpu().numpy()[0], chosen_object_box)
-            cropArr.append([process_crop(left_frame, large_box, padding),0,np.argmin(distances)])
-
-        # Process right side
-        mouse_centroid = get_centroid(mouseR[0].boxes.xyxy.cpu().numpy()[0])
-        object_centroids = []
-        for box in rBoxes:
-            object_centroids.append(get_centroid(box))
-        distances = [np.linalg.norm(mouse_centroid - obj_centroid) for obj_centroid in object_centroids]
-        if len(distances) > 1:
-            chosen_object_box = rBoxes[np.argmin(distances)]
-            large_box = create_convex_hull_box(mouseR[0].boxes.xyxy.cpu().numpy()[0], chosen_object_box)
-            cropArr.append([process_crop(right_frame, large_box, padding),1,np.argmin(distances)])
-
-        return cropArr if cropArr else None
-    else:
-        return None
-
 
 def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
     # Create video capture object
@@ -158,6 +70,8 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
         return None  # Return None instead of exit() for better error handling
 
     # Get video properties
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     totalNoFrames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frameT = totalNoFrames / (fps * totalNoFrames)  # Time per frame
@@ -176,6 +90,11 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
     T1, T2, T3 = 150, 300, 600
     time_periods = np.array([T1, T2, T3])
 
+    # Initialize object arrays
+    objArrL = []
+    objArrR = []
+    firstObj = False
+
     # Use deques for efficient append and pop operations
     leftArr = deque()
     rightArr = deque()
@@ -185,70 +104,92 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
         ret, frame = cap.read()
         if not ret:
             break
-        frame = cv2.resize(frame, (416,416))
+        
+        # Convert Frames to Greyscale
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         # Update progress
         my_bar.progress(round((frameCount/totalNoFrames)*100), text=progress_text)
 
         # Split frame
-        midpoint = frame.shape[1] // 2
+        midpoint = w // 2
+        left_frame = frame[:, :midpoint]
+        right_frame = frame[:, midpoint:]
+        left_frame_grey = gray_frame[:, :midpoint]
+        right_frame_grey = gray_frame[:, midpoint:]
+
+        # Append frame
+        frames.append(gray_frame)
+        splitframes.append(left_frame_grey)
+        splitframes.append(right_frame_grey)
+
 
         # Detect time period
         frametime = frameCount * frameT
         framePeriod = np.searchsorted(time_periods, frametime)
 
         # Check for mouse presence and run YOLO
-        mouseCheck = yoloMouse(frame, verbose=False, conf=0.5, max_det = 2, half=True)
-        if len(mouseCheck[0].boxes.xyxy.cpu().numpy()) == 2:
-            # Split Image
-            left_frame = frame[:, :midpoint]
-            right_frame = frame[:, midpoint:]
+        mouseCheck = yoloMouse([left_frame, right_frame], verbose=False)
+        
+        if len(mouseCheck[0].boxes) > 0 and len(mouseCheck[1].boxes) > 0:
+            if not firstObj:
+                objects = yoloLocalizer([left_frame, right_frame], verbose=False, conf=0.5)
+                objArrL = [centroid(obj) for obj in objects[0] if centroid(obj) is not None]
+                objArrR = [centroid(obj) for obj in objects[1] if centroid(obj) is not None]
+                firstObj = True
+
+            lC = centroid(mouseCheck[0])
+            rC = centroid(mouseCheck[1])
+            st.image(left_frame_grey)
+            results = yoloInteractor([left_frame_grey, right_frame_grey], verbose=True)
             
-            # Get Interaction Region Crop
-            cropArr = run_interaction(left_frame, right_frame, yoloMouse, yoloLocalizer, padding=15)
-            if cropArr is not None:
-                for crop in cropArr:
-                    if len(crop[0]) == 0:
-                        continue
-                    else:
-                        gray_crop = cv2.cvtColor(crop[0][0], cv2.COLOR_BGR2GRAY)
-                        frames.append(gray_crop)
-                        interaction_results = yoloInteractor(gray_crop, verbose=False)
-                        if crop[1] == 0:
-                            if interaction_results[0].probs.top1 == 0:
-                                leftArr.append(1)
-                                leftTime[framePeriod] += frameT
-                                if crop[2] == 0:
-                                    objLeftInt.append(0)
-                                else:
-                                    objLeftInt.append(1)
-                            else:
-                                leftArr.append(0)
-                        elif crop[1] == 1:
-                            if interaction_results[0].probs.top1 == 0:
-                                rightArr.append(1)
-                                rightTime[framePeriod] += frameT
-                                if crop[2] == 0:
-                                    objRightInt.append(0)
-                                else:
-                                    objRightInt.append(1)
-                            else:
-                                rightArr.append(0)
+            # Left interaction
+            if results[0].probs.top1 == 0:
+                if len(objArrL) > 1 and lC is not None:
+                    objL = min(objArrL, key=lambda x: np.linalg.norm(x - lC) if x is not None and lC is not None else np.inf)
+                    objLeftInt.append(objL[0])
+                leftArr.append(1)
+                leftTime[framePeriod] += frameT
+
+                #left_buffer_count = buffer_frames
+            else:
+                leftArr.append(0)
+            
+            # Right interaction
+            if results[1].probs.top1 == 0:
+                if len(objArrR) > 1 and rC is not None:
+                    objR = min(objArrR, key=lambda x: np.linalg.norm(x - rC) if x is not None and rC is not None else np.inf)
+                    objRightInt.append(objR[0])
+                rightArr.append(1)
+                rightTime[framePeriod] += frameT
+
+                #right_buffer_count = buffer_frames
+            else:
+                rightArr.append(0)
+        else:
+            leftArr.append(2)
+            rightArr.append(2)
+        # Update buffer counts
+        #left_buffer_count = max(0, left_buffer_count - 1)
+        #right_buffer_count = max(0, right_buffer_count - 1)
 
     cap.release()
 
     # Compute final statistics
     leftArr = np.array(leftArr)
+    print(leftArr)
     leftAp = np.sum(leftArr)
     rightArr = np.array(rightArr)
+    print(rightArr)
     rightAp = np.sum(rightArr)
+
+    rightObj = len(set(objRightInt))
+    leftObj = len(set(objLeftInt))
+
     rightApT = rightAp * frameT
     leftApT = leftAp * frameT
-    topObjL = objLeftInt.count(0)
-    bottomObjL = objLeftInt.count(1)
-    topObjR = objRightInt.count(0)
-    bottomObjR = objRightInt.count(1)
-    return leftArr, rightArr, leftAp, rightAp, leftApT, rightApT, leftTime, rightTime, topObjL, bottomObjL, topObjR, bottomObjR, frames
+
+    return leftTime, rightTime, rightAp, leftAp, rightApT, leftApT, rightObj, leftObj, frames, splitframes, leftArr, rightArr
 
 start = False
 
@@ -266,7 +207,7 @@ torch.cuda.set_device(0)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 localizerPath = 'Models/yolov9_objectLocalizer.pt'
 mousePath = 'Models/mouse_detection_yolov9c.pt'
-interactorPath = 'Models/YOLOV8_INTERACT.pt'
+interactorPath = 'Models/yolov8xl_grey.pt'
 yoloLocalizer = YOLO(localizerPath).to(device)
 yoloMouse = YOLO(mousePath).to(device)
 yoloInteractor = YOLO(interactorPath).to(device)
@@ -303,22 +244,24 @@ if start and not st.session_state.processed_data['processing_complete']:
                 progress_text = f"Processing Video: {vidIndex}"
                 my_bar = st.progress(0, text=progress_text)
                 video = os.path.join(path, file)
-                leftArr, rightArr, leftAp, rightAp, leftApT, rightApT, leftTime, rightTime, topObjL, bottomObjL, topObjR, bottomObjR, frames = labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer)
+                leftTime, rightTime, rightAp, leftAp, rightApT, leftApT, rightObj, leftObj, frames, splitframes, leftArr, rightArr = labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer)
                 data = {
-                    "Video Name": [video],
-                    "Left Interaction Time Per Period": [leftTime],
-                    "Right Interaction Time Per Period": [rightTime],
-                    "Left Total Approach": [leftAp],
-                    "Right Total Approach": [rightAp],
-                    "Left Top Object Interaction": [topObjL],
-                    "Left Bottom Object Interaction": [bottomObjL],
-                    "Right Top Object Interaction": [topObjR],
-                    "Right Bottom Object Interaction": [bottomObjR]
+                    "VideoName": [video],
+                    "leftTime": [leftTime],
+                    "rightTime": [rightTime],
+                    "leftAp": [leftAp],
+                    "rightAp": [rightAp],
+                    "leftApT": [leftApT],
+                    "rightApT": [rightApT],
+                    "leftObj": [leftObj],
+                    "rightObj": [rightObj],
                 }
                 df = pd.DataFrame(data)
                 st.session_state.processed_data['dfTot'] = pd.concat([st.session_state.processed_data['dfTot'], df], ignore_index=True)
                 vidIndex += 1
-                st.session_state.processed_data['globalFrames'].extend(frames)
+                st.session_state.processed_data['globalFrames'].extend(splitframes)
+                st.session_state.processed_data['all_left_arr'].extend(leftArr)
+                st.session_state.processed_data['all_right_arr'].extend(rightArr)
                 my_bar.empty()
     
     st.session_state.processed_data['processing_complete'] = True
@@ -340,7 +283,20 @@ if st.session_state.processed_data['processing_complete']:
         
         if pil_images:
             current_image = pil_images[st.session_state.processed_data['image_index']]
-            st.image(current_image, use_column_width=True)
+            current_left = st.session_state.processed_data['all_left_arr'][st.session_state.processed_data['image_index']]
+            current_right = st.session_state.processed_data['all_right_arr'][st.session_state.processed_data['image_index']]
+            
+            # Create a new image with text
+            img_with_text = Image.new('RGB', (current_image.width, current_image.height + 30), color='white')
+            img_with_text.paste(current_image, (0, 30))
+            
+            # Add text to the image
+            draw = ImageDraw.Draw(img_with_text)
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+            text = f"Left: {current_left}, Right: {current_right}"
+            draw.text((10, 5), text, font=font, fill='black')
+            img_with_text = img_with_text.resize((720,720))
+            st.image(img_with_text, use_column_width=True)
         else:
             st.write("No frames to display.")
         
@@ -355,10 +311,30 @@ if st.session_state.processed_data['processing_complete']:
                 st.session_state.processed_data['image_index'] = (st.session_state.processed_data['image_index'] + 1) % len(pil_images)
             else:
                 st.session_state.processed_data['image_index'] = 0
+        if st.button("Incorrect", use_container_width=True):
+            FRAME_DIR = "incorrect"
+            if not os.path.exists(FRAME_DIR):
+                os.makedirs(FRAME_DIR)
+            img = np.array(pil_images[st.session_state.processed_data['image_index']])
+            h, w, c = img.shape
+            rand = random.randint(0,1000000)
+            rightCrop = img[0:h, w//2:w]
+            leftCrop = img[0:h, 0:w//2]
+            filePathR = f"{FRAME_DIR}/frameRight{rand}.jpg"
+            filePathL = f"{FRAME_DIR}/frameLeft{rand}.jpg"
+            iio.imwrite(filePathR, rightCrop)
+            iio.imwrite(filePathL, leftCrop)
+            st.session_state.processed_data['incorrect'].append(filePathR)
+            st.session_state.processed_data['incorrect'].append(filePathL)
+            if (st.session_state.processed_data['image_index'] + 1) % len(pil_images) <= len(pil_images):
+                st.session_state.processed_data['image_index'] = (st.session_state.processed_data['image_index'] + 1) % len(pil_images)
+            else:
+                st.session_state.processed_data['image_index'] = 0
+            st.success(f"Image saved!", icon="✅")
         current_datetime = datetime.now()
         st.download_button(
             label="Download data as CSV",
-            data=st.session_state.processed_data['dfTot'].to_csv(),
+            data=dfTot.to_csv(),
             file_name=f"{current_datetime}.csv",
             mime="text/csv",
             use_container_width=True,
