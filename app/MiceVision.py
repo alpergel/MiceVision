@@ -165,6 +165,8 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
     # Initialize counters and arrays
     leftTime = np.zeros(3, dtype=np.float32)
     rightTime = np.zeros(3, dtype=np.float32)
+    leftTimePer = [[0.0,0.0],[0.0,0.0],[0.0,0.0]]
+    rightTimePer = [[0.0,0.0],[0.0,0.0],[0.0,0.0]]
     leftArr = []
     rightArr = []
     objLeftInt = []
@@ -200,6 +202,7 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
         # Check for mouse presence and run YOLO
         mouseCheck = yoloMouse(frame, verbose=False, conf=0.5, max_det = 2, half=True)
         if len(mouseCheck[0].boxes.xyxy.cpu().numpy()) == 2:
+            
             # Split Image
             left_frame = frame[:, :midpoint]
             right_frame = frame[:, midpoint:]
@@ -208,30 +211,57 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
             cropArr = run_interaction(left_frame, right_frame, yoloMouse, yoloLocalizer, padding=15)
             if cropArr is not None:
                 for crop in cropArr:
+                    # Skip if crop size is 0
                     if len(crop[0]) == 0:
                         continue
                     else:
+                        # Convert crop to greyscale
                         gray_crop = cv2.cvtColor(crop[0][0], cv2.COLOR_BGR2GRAY)
                         frames.append(gray_crop)
+                        
+                        # Run YOLO Interaction Detector
                         interaction_results = yoloInteractor(gray_crop, verbose=False)
+                        
+                        # If Crop is From Left Side
                         if crop[1] == 0:
+                            # If Interaction Detected
                             if interaction_results[0].probs.top1 == 0:
+                                
+                                # Add 1 to the count
                                 leftArr.append(1)
+                                
+                                # Increase Interaction Time
                                 leftTime[framePeriod] += frameT
+                                
+                                # Determine Top/Bottom Interaction
                                 if crop[2] == 0:
                                     objLeftInt.append(0)
+                                    leftTimePer[0][0] += frameT
                                 else:
                                     objLeftInt.append(1)
+                                    leftTimePer[0][1] += frameT
                             else:
                                 leftArr.append(0)
+                                
+                        # If Crop is From Right Side
                         elif crop[1] == 1:
+                            # If Interaction Detected
                             if interaction_results[0].probs.top1 == 0:
+                                
+                                # Add 1 to the count
                                 rightArr.append(1)
+                                
+                                # Increase Interaction Time
                                 rightTime[framePeriod] += frameT
+                                
+                                # Determine Top/Bottom Interaction
                                 if crop[2] == 0:
                                     objRightInt.append(0)
+                                    rightTimePer[0][0] += frameT
                                 else:
                                     objRightInt.append(1)
+                                    rightTimePer[0][1] += frameT
+
                             else:
                                 rightArr.append(0)
 
