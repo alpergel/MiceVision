@@ -172,7 +172,6 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
     objLeftInt = []
     objRightInt = []
     frames = []
-    splitframes = []
 
     # Pre-compute time periods
     T1, T2, T3 = 150, 300, 600
@@ -269,6 +268,7 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
 
     # Compute final statistics
     leftArr = np.array(leftArr)
+    print(leftArr)
     leftAp = np.sum(leftArr)
     rightArr = np.array(rightArr)
     rightAp = np.sum(rightArr)
@@ -289,14 +289,14 @@ with st.sidebar:
         st.write(f'Running pipeline over {sum([len(files) for r, d, files in os.walk(folder)])} video(s)')
         start = True
     st.divider()
-    sampleRate = st.slider("Select a rate to sample images from the videos at",1,1000,3)
+    sampleRate = st.slider("Select a rate to sample images from the videos at",1,30,3)
 
 # Activate Models
 torch.cuda.set_device(0)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 localizerPath = 'Models/yolov9_objectLocalizer.pt'
 mousePath = 'Models/mouse_detection_yolov9c.pt'
-interactorPath = 'Models/YOLOV8_INTERACT.pt'
+interactorPath = 'Models/yolov11L_95_top1.pt'
 yoloLocalizer = YOLO(localizerPath).to(device)
 yoloMouse = YOLO(mousePath).to(device)
 yoloInteractor = YOLO(interactorPath).to(device)
