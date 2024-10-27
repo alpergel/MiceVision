@@ -92,22 +92,23 @@ def process_crop(image, large_box, padding):
     
     cropped_image = cv2.resize(cropped_image, (256, 256))
     return [cropped_image]
-def processSideOld(object_model, frame,mouseSide, padding, num):
-    objects = object_model(frame, verbose=False, max_det = 4)
-    Boxes = []
-    for obj in objects:
-        Boxes.append(obj.boxes.xyxy.cpu().numpy())
-    Boxes = sorted(Boxes[0], key=lambda o: get_centroid(o)[1])
-    mouse_centroid = get_centroid(mouseSide[0].boxes.xyxy.cpu().numpy()[0])
-    object_centroids = []
-    for box in Boxes:
-        object_centroids.append(get_centroid(box))
-    distances = [np.linalg.norm(mouse_centroid - obj_centroid) for obj_centroid in object_centroids]
-    if len(distances) > 1:
-        chosen_object_box = Boxes[np.argmin(distances)]
-        large_box = create_convex_hull_box(mouseSide[0].boxes.xyxy.cpu().numpy()[0], chosen_object_box)
-        return [process_crop(frame, large_box, padding),num,np.argmin(distances)]
-    return None
+
+# def processSideOld(object_model, frame,mouseSide, padding, num):
+#     objects = object_model(frame, verbose=False, max_det = 4)
+#     Boxes = []
+#     for obj in objects:
+#         Boxes.append(obj.boxes.xyxy.cpu().numpy())
+#     Boxes = sorted(Boxes[0], key=lambda o: get_centroid(o)[1])
+#     mouse_centroid = get_centroid(mouseSide[0].boxes.xyxy.cpu().numpy()[0])
+#     object_centroids = []
+#     for box in Boxes:
+#         object_centroids.append(get_centroid(box))
+#     distances = [np.linalg.norm(mouse_centroid - obj_centroid) for obj_centroid in object_centroids]
+#     if len(distances) > 1:
+#         chosen_object_box = Boxes[np.argmin(distances)]
+#         large_box = create_convex_hull_box(mouseSide[0].boxes.xyxy.cpu().numpy()[0], chosen_object_box)
+#         return [process_crop(frame, large_box, padding),num,np.argmin(distances)]
+#     return None
 
 def match_mice_to_boxes(object_model, frame, mouseSides, padding):
     objects = object_model(frame, verbose=False, max_det=4)
@@ -117,73 +118,85 @@ def match_mice_to_boxes(object_model, frame, mouseSides, padding):
     Mice = []
     for mous in mouseSides:
         Mice.append(mous.boxes.xyxy.cpu().numpy())
-    Boxes = sorted(Boxes[0], key=lambda o: get_centroid(o)[1])  # Sort Boxes by Y
+        
+    Boxes = sorted(Boxes[0], key=lambda o: get_centroid(o)[0])  # Sort Boxes by Y
     Mice = sorted(Mice[0], key=lambda o: get_centroid(o)[0])   # Sort Mice by X
-    if len(Mice) < 2 or len(Boxes) < 2:
-        return None  # Ensure there are at least 2 mice and 2 boxes
 
-    mouse_centroids = [get_centroid(mouse) for mouse in Mice]
-    object_centroids = [get_centroid(box) for box in Boxes]
+    left_mice = []
+    right_mice = []
+    left_mouse_centroids = []
+    right_mouse_centroids = []
+    left_boxes = []
+    right_boxes = []
+    left_object_centroids = []
+    right_object_centroids = []
+
+    for mouse in Mice:
+        centroid = get_centroid(mouse)
+        if centroid[0] < frame.shape[1] // 2:  # Left side
+            left_mice.append(mouse)
+            left_mouse_centroids.append(centroid)
+        else:  # Right side
+            right_mice.append(mouse)
+            right_mouse_centroids.append(centroid)
+
+    for box in Boxes:
+        centroid = get_centroid(box)
+        if centroid[0] < frame.shape[1] // 2:  # Left side
+            left_boxes.append(box)
+            left_object_centroids.append(centroid)
+        else:  # Right side
+            right_boxes.append(box)
+            right_object_centroids.append(centroid)
+            
+    if len(left_mice) != 1 or len(left_boxes) < 2 or len(right_mice) != 1 or len(right_boxes) < 2:
+        return None         
     
-    distances = np.zeros((len(mouse_centroids), len(object_centroids)))
-    for i, mouse_centroid in enumerate(mouse_centroids):
-        for j, obj_centroid in enumerate(object_centroids):
-            distances[i, j] = np.linalg.norm(mouse_centroid - obj_centroid)
+    left_boxes = sorted(left_boxes, key=lambda box: get_centroid(box)[1])  # Sort left boxes by Y
+    right_boxes = sorted(right_boxes, key=lambda box: get_centroid(box)[1])  # Sort right boxes by Y
+
+    ldistances = np.zeros((len(left_mouse_centroids), len(left_object_centroids)))
+    rdistances = np.zeros((len(right_mouse_centroids), len(right_object_centroids)))
+
+    for i, mouse_centroid in enumerate(left_mouse_centroids):
+        for j, obj_centroid in enumerate(left_object_centroids):
+            ldistances[i, j] = np.linalg.norm(mouse_centroid - obj_centroid)
+    
+    for i, mouse_centroid in enumerate(right_mouse_centroids):
+        for j, obj_centroid in enumerate(right_object_centroids):
+            rdistances[i, j] = np.linalg.norm(mouse_centroid - obj_centroid)
     
     matched_boxes = []
-    for i in range(len(mouse_centroids)):
-        closest_box_index = np.argmin(distances[i])
-        matched_boxes.append((Mice[i], Boxes[closest_box_index]))
-        distances[:, closest_box_index] = np.inf  # Exclude this box for the next mouse
-    #print("BOX MATCH DEBUG: ", matched_boxes)
-    matched_boxes = sorted(matched_boxes, key=lambda x: x[0][0])  # Sort by the x-coordinate of the mouse centroid
+    for i in range(len(left_mouse_centroids)):
+        closest_box_index = np.argmin(ldistances[i])
+        matched_boxes.append((left_mice[i], left_boxes[closest_box_index],(0,closest_box_index)))
+        ldistances[:, closest_box_index] = np.inf  # Exclude this box for the next mouse
+        
+    for i in range(len(right_mouse_centroids)):
+        closest_box_index = np.argmin(rdistances[i])
+        matched_boxes.append((right_mice[i], right_boxes[closest_box_index],(1,closest_box_index)))
+        rdistances[:, closest_box_index] = np.inf  # Exclude this box for the next mouse
     
     large_boxes = []
-
-    for mouse, box in matched_boxes:
-        box_centroid = get_centroid(box)
-        print(box_centroid, frame.shape[0]//2)
-        # Determine if the box is on the left or right side
-        if box_centroid[0] < frame.shape[1] // 2:
-            side = 0
-        else:
-            side = 1
-        
-        # Determine if the box is on the top or bottom
-        if box_centroid[1] < frame.shape[0] // 2:
-            position = 1
-        else:
-            position = 0
+    for mouse, box, s in matched_boxes:
+        #box_centroid = get_centroid(box)
         if len(mouse) >= 4 and len(box) >= 4:  # Ensure both mouse and box have enough coordinates
-            large_boxes.append((create_convex_hull_box(mouse, box),(side,position)))
+            x,y = int(s[0]),int(s[1])  # Convert np.int64 to a normal int
+            large_boxes.append((create_convex_hull_box(mouse, box),(x,y)))
+    # Crop the Images
     cropped_images = [(process_crop(frame, large_box, padding)[0], position) for (large_box, position) in large_boxes]
 
     return cropped_images
 
 
 def run_interaction(frame, mouse_model, object_model, padding=10):
-    # left_frame = cv2.resize(left_frame, (416,416))
-    # right_frame = cv2.resize(right_frame, (416,416))
     frame = cv2.resize(frame, (416,416))
     # Detect Mice
     mouseB = mouse_model(frame, verbose=False, max_det = 2)
-    
-    # mouseL = mouse_model(left_frame, verbose=False,  max_det = 1)[0]
-    # mouseR = mouse_model(right_frame, verbose=False,  max_det = 1)[0]
-    
+
     if len(mouseB) > 0:
         # Detect objects
-        #crops = processSide(object_model,frame, mouseB, padding, 0)
         crops = match_mice_to_boxes(object_model,frame,mouseB, padding)
-
-        # leftCrop = processSide(object_model, left_frame, mouseL, padding, 0)
-        # rightCrop = processSide(object_model, right_frame, mouseR, padding, 1)
-        
-        # # Add to CropARR
-        # if leftCrop is not None:
-        #     cropArr.append(leftCrop)
-        # if rightCrop is not None:
-        #     cropArr.append(rightCrop)
         
         return crops if crops else None
     else:

@@ -23,8 +23,9 @@ def generateHeatmap(modelPath, video, progress_text, sampleRate):
     totalNoFrames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     # Video writer
-    video_name = os.path.basename(video)
-    video_writer = cv2.VideoWriter("heatmap_output_{video_name}.avi", cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    video_name = os.path.splitext(os.path.basename(video))[0]
+    path = f"/app/heatmaps/heatmap_output_{video_name}.mp4"
+    video_writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
 
     # Init heatmap
     heatmap = solutions.Heatmap(
@@ -40,7 +41,8 @@ def generateHeatmap(modelPath, video, progress_text, sampleRate):
         my_bar2.progress(round((frameCount/totalNoFrames)*100), text=progress_text)
         im0 = heatmap.generate_heatmap(im0)
         video_writer.write(im0)
-    return "heatmap_output_{video_name}.avi"
+    video_writer.release()
+    return path
 
 
 def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
@@ -111,7 +113,6 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
                         interaction_results = yoloInteractor(gray_crop, verbose=False)
                         
                         # If Crop is From Left Side
-                        print(crop[1])
                         if crop[1][0] == 0:
                             # If Interaction Detected
                             if interaction_results[0].probs.top1 == 0:
@@ -158,7 +159,9 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
     cap.release()
 
     # Compute final statistics
+    
     leftArr = np.array(leftArr)
+    print(leftArr)
     leftAp = np.sum(leftArr)
     rightArr = np.array(rightArr)
     rightAp = np.sum(rightArr)
@@ -221,6 +224,7 @@ if start and not st.session_state.processed_data['processing_complete']:
 
         for file in os.listdir(path):
             if any(file.endswith(ext) for ext in video_extensions):
+                # NOR Operations
                 progress_text = f"Running NOR: Video {vidIndex}"
                 my_bar = st.progress(0, text=progress_text)
                 video = os.path.join(path, file)
@@ -242,6 +246,7 @@ if start and not st.session_state.processed_data['processing_complete']:
                 st.session_state.processed_data['dfTot'] = pd.concat([st.session_state.processed_data['dfTot'], df], ignore_index=True)
                 st.session_state.processed_data['globalFrames'].extend(frames)
                 my_bar.empty()
+                # Heatmap Generation Operations
                 progress_text2 = f"Processing Heatmap: Video {vidIndex}"
                 my_bar2 = st.progress(0, text=progress_text2)
                 videos.append(generateHeatmap(mousePath,video,progress_text2, sampleRate))
@@ -266,11 +271,6 @@ if st.session_state.processed_data['processing_complete']:
 
     # Display the current image in the center column
     with center_col:
-        for vid in videos:
-            videoFile = open(vid,"rb")
-            videoBytes = videoFile.read()
-            st.video(videoBytes)
-        
        
         # if st.button("◀ Previous", use_container_width=True):
         #     if (st.session_state.processed_data['image_index'] - 1) % len(pil_images) >= 0:
