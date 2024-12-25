@@ -44,6 +44,17 @@ def generateHeatmap(modelPath, video, progress_text, sampleRate):
     video_writer.release()
     return path
 
+def count_groups_of_ones(arr, val):
+    count = 0
+    in_group = False
+    for value in arr:
+        if value == val:
+            if not in_group:
+                count += 1
+                in_group = True
+        else:
+            in_group = False
+    return count
 
 def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
     # Create video capture object
@@ -162,15 +173,15 @@ def labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer):
     
     leftArr = np.array(leftArr)
     print(leftArr)
-    leftAp = np.sum(leftArr)
+    leftAp = count_groups_of_ones(leftArr, 1)
     rightArr = np.array(rightArr)
-    rightAp = np.sum(rightArr)
+    rightAp = count_groups_of_ones(rightArr, 1)
     rightApT = rightAp * frameT
     leftApT = leftAp * frameT
-    topObjL = objLeftInt.count(0)
-    bottomObjL = objLeftInt.count(1)
-    topObjR = objRightInt.count(0)
-    bottomObjR = objRightInt.count(1)
+    topObjL = count_groups_of_ones(np.array(objLeftInt),0)
+    bottomObjL = count_groups_of_ones(np.array(objLeftInt),1)
+    topObjR = count_groups_of_ones(np.array(objRightInt),0)
+    bottomObjR = count_groups_of_ones(np.array(objRightInt),1)
     return leftArr, rightArr, leftAp, rightAp, leftApT, rightApT, leftTime, rightTime, topObjL, bottomObjL, topObjR, bottomObjR, frames
 
 start = False
@@ -182,7 +193,11 @@ with st.sidebar:
         st.write(f'Running pipeline over {sum([len(files) for r, d, files in os.walk(folder)])} video(s)')
         start = True
     st.divider()
-    sampleRate = st.slider("Select a rate to sample images from the videos at",1,30,15)
+    sampleRate = st.slider("Select a rate to sample images from the videos at. Best Results @ 15 FPS",1,30,15)
+    generate_heatmap = st.checkbox("Generate Heatmap", value=False)
+
+    if generate_heatmap:
+        st.write("Heatmap will be generated for the interactions.")
 
 # Activate Models
 torch.cuda.set_device(0)
@@ -229,6 +244,7 @@ if start and not st.session_state.processed_data['processing_complete']:
                 my_bar = st.progress(0, text=progress_text)
                 video = os.path.join(path, file)
                 leftArr, rightArr, leftAp, rightAp, leftApT, rightApT, leftTime, rightTime, topObjL, bottomObjL, topObjR, bottomObjR, frames = labelNOR(video, sampleRate, yoloInteractor, yoloMouse, yoloLocalizer)
+                print(leftArr)
                 data = {
                     "Video Name": [video],
                     "Left Interaction Time Per Period": [leftTime],
@@ -247,10 +263,11 @@ if start and not st.session_state.processed_data['processing_complete']:
                 st.session_state.processed_data['globalFrames'].extend(frames)
                 my_bar.empty()
                 # Heatmap Generation Operations
-                progress_text2 = f"Processing Heatmap: Video {vidIndex}"
-                my_bar2 = st.progress(0, text=progress_text2)
-                videos.append(generateHeatmap(mousePath,video,progress_text2, sampleRate))
-                my_bar2.empty()
+                if generate_heatmap:
+                    progress_text2 = f"Processing Heatmap: Video {vidIndex}"
+                    my_bar2 = st.progress(0, text=progress_text2)
+                    videos.append(generateHeatmap(mousePath,video,progress_text2, sampleRate))
+                    my_bar2.empty()
                 vidIndex += 1
 
 
